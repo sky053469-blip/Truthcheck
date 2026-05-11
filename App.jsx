@@ -1,10 +1,4 @@
-import { useState, useRef } from "react";
-
-const SYS = `You are TruthCheck AI. Fact-check the given claim using web_search (max 2 searches).
-Return ONLY this JSON structure, no markdown, no extra text:
-{"verdict":"REAL","confidence":85,"credibilityScore":80,"summary":"Short 2 sentence summary.","claims":[{"claim":"claim text","status":"VERIFIED","explanation":"explanation","source":"Reuters"}],"redFlags":["flag"],"positiveIndicators":["signal"],"sourcesChecked":["Reuters"],"recommendation":"advice for reader","category":"Politics","searchInsights":"key finding"}
-verdict options: REAL, FAKE, MISLEADING, UNVERIFIED
-status options: VERIFIED, FALSE, MISLEADING, UNVERIFIED`;
+import { useState, useRef, useEffect, useCallback } from "react";
 
 const G = {
   green:"#00B67A",gdk:"#008C5E",glt:"#E6F8F2",
@@ -193,6 +187,136 @@ function Result({ r }) {
   );
 }
 
+function HistoryBadge({ verdict }) {
+  const vc = VD[verdict] || VD.UNVERIFIED;
+  return (
+    <span style={{display:"inline-flex",alignItems:"center",gap:4,background:vc.bg,border:`1px solid ${vc.border}`,borderRadius:20,padding:"2px 10px",fontSize:11,color:vc.color,fontWeight:700}}>
+      {vc.icon} {vc.label}
+    </span>
+  );
+}
+
+function HistoryPage({ onVerify }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/history");
+      if (!res.ok) throw new Error("Failed to load history");
+      setRows(await res.json());
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const verdictCounts = rows.reduce((acc, r) => {
+    acc[r.verdict] = (acc[r.verdict] || 0) + 1;
+    return acc;
+  }, {});
+
+  function formatDate(ts) {
+    if (!ts) return "";
+    const d = new Date(ts);
+    return d.toLocaleDateString("en-US", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" });
+  }
+
+  return (
+    <div style={{minHeight:"100vh",background:G.grayLt,fontFamily:"'DM Sans',sans-serif",color:G.text}}>
+      <div style={{maxWidth:660,margin:"0 auto",padding:"30px 18px 80px"}}>
+        <div style={{marginBottom:24}}>
+          <h1 style={{fontFamily:"'Poppins',sans-serif",fontSize:28,fontWeight:800,color:G.navy,marginBottom:4}}>Verification History</h1>
+          <p style={{fontSize:13,color:G.gray}}>All fact-checks performed on this platform, stored in real-time.</p>
+        </div>
+
+        {/* Stats */}
+        {rows.length>0&&(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
+            {[["Total",rows.length,G.navy],["Real",verdictCounts.REAL||0,G.green],["Fake",verdictCounts.FAKE||0,"#EF4444"],["Misleading",(verdictCounts.MISLEADING||0)+(verdictCounts.UNVERIFIED||0),"#F59E0B"]].map(([l,v,c])=>(
+              <div key={l} style={{background:G.white,border:`1px solid ${G.grayBd}`,borderRadius:14,padding:"14px 10px",textAlign:"center",boxShadow:"0 1px 6px rgba(0,0,0,.04)"}}>
+                <div style={{fontFamily:"'Poppins',sans-serif",fontSize:26,fontWeight:800,color:c,lineHeight:1}}>{v}</div>
+                <div style={{fontSize:11,color:G.gray,marginTop:4}}>{l}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {loading&&(
+          <div style={{background:G.white,border:`1px solid ${G.grayBd}`,borderRadius:14,padding:"40px",textAlign:"center"}}>
+            <div style={{width:8,height:8,borderRadius:"50%",background:G.green,animation:"pulse 1s infinite",display:"inline-block",marginRight:8}}/>
+            <span style={{fontSize:13,color:G.gray}}>Loading history…</span>
+          </div>
+        )}
+
+        {error&&(
+          <div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:14,padding:"16px 18px",color:"#991B1B",fontSize:13}}>
+            ⚠ {error}
+          </div>
+        )}
+
+        {!loading&&!error&&rows.length===0&&(
+          <div style={{background:G.white,border:`1px solid ${G.grayBd}`,borderRadius:18,padding:"56px 24px",textAlign:"center",boxShadow:"0 2px 12px rgba(0,0,0,.05)"}}>
+            <div style={{fontSize:48,marginBottom:16}}>🔍</div>
+            <div style={{fontFamily:"'Poppins',sans-serif",fontSize:18,fontWeight:700,color:G.navy,marginBottom:8}}>No verifications yet</div>
+            <p style={{fontSize:13,color:G.gray,marginBottom:24,lineHeight:1.7}}>Run your first fact-check and the results will appear here automatically.</p>
+            <button onClick={onVerify} style={{background:G.green,color:"#fff",border:"none",padding:"12px 28px",borderRadius:25,fontFamily:"inherit",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:`0 4px 14px ${G.green}50`}}>
+              Verify a claim →
+            </button>
+          </div>
+        )}
+
+        {!loading&&rows.length>0&&(
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {rows.map((row)=>{
+              const isOpen = expanded===row.id;
+              let parsed = null;
+              if (isOpen) {
+                try { parsed = JSON.parse(row.resultJson||"{}"); } catch {}
+              }
+              return (
+                <div key={row.id} style={{background:G.white,border:`1px solid ${G.grayBd}`,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.04)",transition:"box-shadow .2s"}}>
+                  <button onClick={()=>setExpanded(isOpen?null:row.id)}
+                    style={{width:"100%",padding:"16px 18px",border:"none",background:"none",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:12,fontFamily:"inherit"}}>
+                    <HistoryBadge verdict={row.verdict}/>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,color:G.navy,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        {row.inputType==="image"?"[Image verification]":row.inputText}
+                      </div>
+                      <div style={{fontSize:11,color:G.gray,marginTop:2,display:"flex",gap:10}}>
+                        <span>{row.category}</span>
+                        <span>·</span>
+                        <span>{row.confidence}% confidence</span>
+                        <span>·</span>
+                        <span>{formatDate(row.createdAt)}</span>
+                      </div>
+                    </div>
+                    <span style={{fontSize:12,color:G.gray,flexShrink:0}}>{isOpen?"▲":"▼"}</span>
+                  </button>
+                  {isOpen&&parsed&&(
+                    <div style={{padding:"0 18px 18px",borderTop:`1px solid ${G.grayBd}`}}>
+                      <div style={{paddingTop:16}}>
+                        <Result r={parsed}/>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [page,    setPage]    = useState("home");
   const [mode,    setMode]    = useState("text");
@@ -203,7 +327,6 @@ export default function App() {
   const [error,   setError]   = useState(null);
   const [imgData, setImgData] = useState(null);
   const [imgPrev, setImgPrev] = useState(null);
-  const [stats,   setStats]   = useState({total:0,real:0,fake:0,unverified:0});
   const clockRef = useRef(null);
   const startRef = useRef(null);
   const fileRef  = useRef(null);
@@ -226,56 +349,21 @@ export default function App() {
     startRef.current=Date.now();
     clockRef.current=setInterval(()=>setElapsed(Date.now()-startRef.current),150);
     try {
-      const userMsg = imgData
-        ? [{type:"image",source:{type:"base64",media_type:"image/jpeg",data:imgData}},{type:"text",text:"Fact-check claims in this image. Use web_search. Return JSON only."}]
-        : mode==="url"
-          ? `Fact-check this URL using web_search. Return JSON only: ${input}`
-          : `Fact-check this using web_search. Return JSON only:\n\n${input}`;
-
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("/api/verify", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: SYS,
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-          messages: [{ role: "user", content: userMsg }],
+          inputType: mode,
+          inputText: input,
+          imageData: imgData,
         }),
       });
 
-      if (!response.ok) {
-        const errBody = await response.text();
-        throw new Error(`API error ${response.status}: ${errBody.slice(0,200)}`);
-      }
-
       const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `Server error ${response.status}`);
+      if (!data.verdict || !VD[data.verdict]) throw new Error("Invalid response from server. Please try again.");
 
-      // Get all text blocks from response
-      const textBlocks = (data.content || []).filter(b => b.type === "text");
-      if (textBlocks.length === 0) throw new Error("No text in response. Try a simpler claim.");
-
-      const fullText = textBlocks.map(b => b.text).join("");
-
-      // Find JSON in the text
-      const start = fullText.indexOf("{");
-      const end = fullText.lastIndexOf("}");
-      if (start === -1 || end === -1) throw new Error("Could not parse response. Please try again.");
-
-      const jsonStr = fullText.slice(start, end + 1);
-      const parsed = JSON.parse(jsonStr);
-
-      if (!parsed.verdict || !VD[parsed.verdict]) throw new Error("Invalid verdict in response.");
-
-      setResult(parsed);
-      setStats(s=>({
-        total:s.total+1,
-        real:s.real+(parsed.verdict==="REAL"?1:0),
-        fake:s.fake+(parsed.verdict==="FAKE"?1:0),
-        unverified:s.unverified+(parsed.verdict==="UNVERIFIED"?1:0),
-      }));
+      setResult(data);
     } catch(e) {
       setError(e.message || "Something went wrong. Please try again.");
     } finally {
@@ -283,6 +371,47 @@ export default function App() {
       setLoading(false);
     }
   }
+
+  const GlobalStyles = () => (
+    <style>{`
+      @keyframes pulse   {0%,100%{opacity:1}50%{opacity:.25}}
+      @keyframes fadeUp  {from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+      @keyframes dotBlink{0%,100%{opacity:1}50%{opacity:0}}
+      @keyframes wave    {from{transform:scaleY(.2)}to{transform:scaleY(1)}}
+      *{box-sizing:border-box;margin:0;padding:0;}
+      textarea::placeholder,input::placeholder{color:#D1D5DB;}
+      ::-webkit-scrollbar{width:4px;}
+      ::-webkit-scrollbar-thumb{background:#E5E7EB;border-radius:2px;}
+    `}</style>
+  );
+
+  const NavBar = ({ showHistory = true }) => (
+    <nav style={{background:G.white,borderBottom:`1px solid ${G.grayBd}`,padding:"0 20px",height:62,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50,boxShadow:"0 1px 10px rgba(0,0,0,.06)"}}>
+      <Logo onClick={()=>{setPage("home");reset();}}/>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        {loading&&<span style={{fontFamily:"monospace",fontSize:12,color:G.green,fontWeight:700}}>{(elapsed/1000).toFixed(1)}s</span>}
+        <Pill color={G.green}>🌐 LIVE</Pill>
+        {showHistory&&(
+          <button onClick={()=>setPage("history")} style={{background:page==="history"?G.glt:"none",color:page==="history"?G.gdk:G.gray,border:`1px solid ${page==="history"?G.green+"50":G.grayBd}`,padding:"8px 16px",borderRadius:20,fontFamily:"inherit",fontSize:13,fontWeight:600,cursor:"pointer"}}>
+            History
+          </button>
+        )}
+        <button onClick={()=>{setPage("verify");reset();}} style={{background:G.green,color:"#fff",border:"none",padding:"10px 22px",borderRadius:25,fontFamily:"inherit",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:`0 4px 14px ${G.green}50`}}>
+          Verify →
+        </button>
+      </div>
+    </nav>
+  );
+
+  // ── HISTORY ───────────────────────────────────────────────────────────────
+  if (page==="history") return (
+    <div style={{minHeight:"100vh",background:G.grayLt,fontFamily:"'DM Sans',sans-serif",color:G.text}}>
+      <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800;900&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+      <NavBar/>
+      <HistoryPage onVerify={()=>setPage("verify")}/>
+      <GlobalStyles/>
+    </div>
+  );
 
   // ── HOME ──────────────────────────────────────────────────────────────────
   if (page==="home") return (
@@ -296,6 +425,9 @@ export default function App() {
             <div style={{width:6,height:6,borderRadius:"50%",background:G.green,animation:"pulse 2s infinite"}}/>
             <span style={{fontSize:11,color:G.gdk,fontWeight:600,letterSpacing:1}}>LIVE</span>
           </div>
+          <button onClick={()=>setPage("history")} style={{background:"none",color:G.gray,border:`1px solid ${G.grayBd}`,padding:"10px 18px",borderRadius:25,fontFamily:"inherit",fontSize:14,cursor:"pointer"}}>
+            History
+          </button>
           <button onClick={()=>setPage("verify")} style={{background:G.green,color:"#fff",border:"none",padding:"10px 22px",borderRadius:25,fontFamily:"inherit",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:`0 4px 14px ${G.green}50`}}>
             Get Started →
           </button>
@@ -321,18 +453,18 @@ export default function App() {
             </span>
           </h1>
           <p style={{fontSize:17,color:"rgba(255,255,255,.62)",lineHeight:1.8,margin:"24px auto 36px",maxWidth:500}}>
-            Paste any news, tweet, or article. Our AI searches the live web and tells you if it's <strong style={{color:G.green}}>real</strong>, <strong style={{color:"#EF4444"}}>fake</strong>, or <strong style={{color:"#F59E0B"}}>misleading</strong> — in seconds.
+            Paste any news, tweet, or article. The AI searches the live web and tells you if it's <strong style={{color:G.green}}>real</strong>, <strong style={{color:"#EF4444"}}>fake</strong>, or <strong style={{color:"#F59E0B"}}>misleading</strong> — in seconds.
           </p>
           <div style={{display:"flex",gap:14,justifyContent:"center",flexWrap:"wrap"}}>
             <button onClick={()=>setPage("verify")} style={{background:G.green,color:"#fff",border:"none",padding:"16px 34px",borderRadius:30,fontFamily:"inherit",fontSize:16,fontWeight:700,cursor:"pointer",boxShadow:`0 8px 28px ${G.green}60`}}>
               Verify a claim free →
             </button>
-            <button onClick={()=>setPage("verify")} style={{background:"rgba(255,255,255,.1)",color:"#fff",border:"1px solid rgba(255,255,255,.25)",padding:"16px 28px",borderRadius:30,fontFamily:"inherit",fontSize:15,cursor:"pointer"}}>
-              See how it works
+            <button onClick={()=>setPage("history")} style={{background:"rgba(255,255,255,.1)",color:"#fff",border:"1px solid rgba(255,255,255,.25)",padding:"16px 28px",borderRadius:30,fontFamily:"inherit",fontSize:15,cursor:"pointer"}}>
+              View history
             </button>
           </div>
           <div style={{display:"flex",justifyContent:"center",gap:32,marginTop:48,flexWrap:"wrap"}}>
-            {[["⚡ ~6s","Avg speed"],["4.9★","Trustpilot"],["200K+","Claims verified"],["80+","Countries"]].map(([v,l])=>(
+            {[["⚡ ~6s","Avg speed"],["Live","Web search"],["4 verdicts","Real/Fake/Misleading/Unverified"],["Multi-source","Cross-verified"]].map(([v,l])=>(
               <div key={l} style={{textAlign:"center"}}>
                 <div style={{fontFamily:"'Poppins',sans-serif",fontSize:20,fontWeight:800,color:G.green}}>{v}</div>
                 <div style={{fontSize:11,color:"rgba(255,255,255,.38)",marginTop:3}}>{l}</div>
@@ -342,44 +474,52 @@ export default function App() {
         </div>
       </section>
 
-      {/* STATS */}
-      {stats.total>0&&(
-        <section style={{background:G.grayLt,borderBottom:`1px solid ${G.grayBd}`}}>
-          <div style={{maxWidth:600,margin:"0 auto",display:"grid",gridTemplateColumns:"repeat(4,1fr)"}}>
-            {[["Verified",stats.total,G.navy],["Real",stats.real,G.green],["Fake",stats.fake,"#EF4444"],["Unverified",stats.unverified,"#8B5CF6"]].map(([l,v,c])=>(
-              <div key={l} style={{textAlign:"center",padding:"24px 10px",borderRight:`1px solid ${G.grayBd}`}}>
-                <div style={{fontFamily:"'Poppins',sans-serif",fontSize:36,fontWeight:800,color:c,lineHeight:1}}>{v}</div>
-                <div style={{fontSize:12,color:G.gray,marginTop:5}}>{l}</div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* VERDICTS */}
+      {/* HOW IT WORKS */}
       <section style={{background:G.white,padding:"72px 20px"}}>
         <div style={{maxWidth:640,margin:"0 auto"}}>
           <div style={{textAlign:"center",marginBottom:40}}>
             <div style={{display:"inline-block",background:`${G.navy}10`,border:`1px solid ${G.navy}20`,borderRadius:20,padding:"4px 14px",marginBottom:16}}>
-              <span style={{fontSize:12,color:G.navy,fontWeight:700,letterSpacing:1}}>FOUR VERDICTS</span>
+              <span style={{fontSize:12,color:G.navy,fontWeight:700,letterSpacing:1}}>HOW IT WORKS</span>
             </div>
+            <h2 style={{fontFamily:"'Poppins',sans-serif",fontSize:"clamp(26px,5vw,40px)",fontWeight:800,color:G.navy,lineHeight:1.15}}>
+              AI-powered, multi-source verification
+            </h2>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14}}>
+            {[
+              {num:"1",title:"Submit",desc:"Paste text, a URL, or upload a screenshot of a claim."},
+              {num:"2",title:"AI searches live",desc:"Our model searches multiple real-time sources and cross-references findings."},
+              {num:"3",title:"Get verdict",desc:"Receive a detailed breakdown with sources, red flags, and a recommendation."},
+            ].map(v=>(
+              <div key={v.num} style={{background:G.white,border:`1px solid ${G.grayBd}`,borderRadius:16,padding:"22px 18px",boxShadow:"0 2px 10px rgba(0,0,0,.05)",textAlign:"center"}}>
+                <div style={{width:40,height:40,borderRadius:"50%",background:`${G.navy}10`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Poppins',sans-serif",fontSize:18,fontWeight:800,color:G.navy,margin:"0 auto 12px"}}>{v.num}</div>
+                <div style={{fontFamily:"'Poppins',sans-serif",fontSize:15,fontWeight:700,color:G.navy,marginBottom:7}}>{v.title}</div>
+                <div style={{fontSize:13,color:G.soft,lineHeight:1.65}}>{v.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* VERDICTS */}
+      <section style={{background:G.grayLt,padding:"72px 20px"}}>
+        <div style={{maxWidth:640,margin:"0 auto"}}>
+          <div style={{textAlign:"center",marginBottom:40}}>
             <h2 style={{fontFamily:"'Poppins',sans-serif",fontSize:"clamp(26px,5vw,40px)",fontWeight:800,color:G.navy,lineHeight:1.15}}>
               Honesty over false certainty.
             </h2>
             <p style={{fontSize:15,color:G.soft,marginTop:12,lineHeight:1.7,maxWidth:440,margin:"12px auto 0"}}>
-              We don't pretend to know everything. If we can't confirm it, we say so.
+              Four verdict types. We won't guess — if evidence is insufficient, we say so.
             </p>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
             {[
-              {icon:"✓",bg:"#DCFCE7",c:G.green,  label:"REAL",       title:"Real",       desc:"Claim aligns with verified facts. We show exactly what corroborates it."},
-              {icon:"✕",bg:"#FEE2E2",c:"#EF4444", label:"FAKE",       title:"Fake",       desc:"Claim is contradicted by evidence or shows hallmarks of misinformation."},
-              {icon:"!",bg:"#FEF3C7",c:"#F59E0B", label:"MISLEADING", title:"Misleading", desc:"Some facts are true but context is missing or framed to deceive."},
-              {icon:"?",bg:"#EDE9FE",c:"#8B5CF6", label:"UNVERIFIED", title:"Unverified", desc:"Insufficient evidence found. We won't guess — honesty matters."},
+              {icon:"✓",bg:"#DCFCE7",c:G.green,  label:"REAL",       title:"Real",       desc:"Claim aligns with verified facts from multiple credible sources."},
+              {icon:"✕",bg:"#FEE2E2",c:"#EF4444", label:"FAKE",       title:"Fake",       desc:"Claim is contradicted by evidence or shows clear hallmarks of misinformation."},
+              {icon:"!",bg:"#FEF3C7",c:"#F59E0B", label:"MISLEADING", title:"Misleading", desc:"Some facts are true but context is missing or framing is deceptive."},
+              {icon:"?",bg:"#EDE9FE",c:"#8B5CF6", label:"UNVERIFIED", title:"Unverified", desc:"Insufficient evidence found to confirm or deny. Honesty matters."},
             ].map(v=>(
-              <div key={v.label} style={{background:G.white,border:`1px solid ${G.grayBd}`,borderRadius:16,padding:"22px 18px",boxShadow:"0 2px 10px rgba(0,0,0,.05)",borderTop:`3px solid ${v.c}`,transition:"transform .2s,box-shadow .2s"}}
-                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 10px 24px rgba(0,0,0,.09)"}}
-                onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 2px 10px rgba(0,0,0,.05)"}}>
+              <div key={v.label} style={{background:G.white,border:`1px solid ${G.grayBd}`,borderRadius:16,padding:"22px 18px",boxShadow:"0 2px 10px rgba(0,0,0,.05)",borderTop:`3px solid ${v.c}`}}>
                 <div style={{width:44,height:44,borderRadius:"50%",background:v.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontWeight:800,color:v.c,marginBottom:12}}>{v.icon}</div>
                 <div style={{fontSize:10,color:v.c,fontWeight:700,letterSpacing:2,marginBottom:4}}>{v.label}</div>
                 <div style={{fontFamily:"'Poppins',sans-serif",fontSize:16,fontWeight:700,color:G.navy,marginBottom:7}}>{v.title}</div>
@@ -405,16 +545,11 @@ export default function App() {
             You can move faster.
           </h2>
           <p style={{fontSize:15,color:"rgba(255,255,255,.52)",lineHeight:1.8,marginBottom:34}}>
-            Free forever for individual use.<br/>No credit card. Start verifying now.
+            Free to use. No sign-up required.<br/>Powered by live web search and AI.
           </p>
-          <div style={{display:"flex",gap:14,justifyContent:"center",flexWrap:"wrap"}}>
-            <button onClick={()=>setPage("verify")} style={{background:G.green,color:"#fff",border:"none",padding:"16px 36px",borderRadius:30,fontFamily:"inherit",fontSize:16,fontWeight:700,cursor:"pointer",boxShadow:`0 8px 28px ${G.green}55`}}>
-              Run a free verification →
-            </button>
-            <button onClick={()=>setPage("verify")} style={{background:"rgba(255,255,255,.1)",color:"#fff",border:"1px solid rgba(255,255,255,.2)",padding:"16px 28px",borderRadius:30,fontFamily:"inherit",fontSize:14,cursor:"pointer"}}>
-              Create account
-            </button>
-          </div>
+          <button onClick={()=>setPage("verify")} style={{background:G.green,color:"#fff",border:"none",padding:"16px 36px",borderRadius:30,fontFamily:"inherit",fontSize:16,fontWeight:700,cursor:"pointer",boxShadow:`0 8px 28px ${G.green}55`}}>
+            Run a free verification →
+          </button>
         </div>
       </section>
 
@@ -422,12 +557,7 @@ export default function App() {
         <span style={{fontSize:11,color:"rgba(255,255,255,.2)",letterSpacing:1}}>© 2026 TRUTHCHECK · AI-POWERED · REAL-TIME WEB VERIFICATION</span>
       </footer>
 
-      <style>{`
-        @keyframes pulse   {0%,100%{opacity:1}50%{opacity:.25}}
-        @keyframes fadeUp  {from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
-        @keyframes dotBlink{0%,100%{opacity:1}50%{opacity:0}}
-        *{box-sizing:border-box;margin:0;padding:0;}
-      `}</style>
+      <GlobalStyles/>
     </div>
   );
 
@@ -436,18 +566,12 @@ export default function App() {
     <div style={{minHeight:"100vh",background:G.grayLt,fontFamily:"'DM Sans',sans-serif",color:G.text}}>
       <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800;900&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
 
-      <nav style={{background:G.white,borderBottom:`1px solid ${G.grayBd}`,padding:"0 20px",height:62,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50,boxShadow:"0 1px 10px rgba(0,0,0,.06)"}}>
-        <Logo onClick={()=>{setPage("home");reset();}}/>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          {loading&&<span style={{fontFamily:"monospace",fontSize:12,color:G.green,fontWeight:700}}>{(elapsed/1000).toFixed(1)}s</span>}
-          <Pill color={G.green}>🌐 LIVE SEARCH</Pill>
-        </div>
-      </nav>
+      <NavBar/>
 
       <div style={{maxWidth:660,margin:"0 auto",padding:"30px 18px 80px"}}>
         <div style={{marginBottom:24}}>
           <h1 style={{fontFamily:"'Poppins',sans-serif",fontSize:28,fontWeight:800,color:G.navy,marginBottom:4}}>Verify a Claim</h1>
-          <p style={{fontSize:13,color:G.gray}}>Paste text, a URL, or upload an image — we search live sources and give you a verdict.</p>
+          <p style={{fontSize:13,color:G.gray}}>Paste text, a URL, or upload an image — the AI searches live sources and gives you a verdict.</p>
         </div>
 
         {/* Tabs */}
@@ -479,7 +603,7 @@ export default function App() {
               <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleFile}/>
               {imgPrev
                 ?<div style={{padding:18}}>
-                    <img src={imgPrev} alt="u" style={{maxWidth:"100%",maxHeight:220,objectFit:"contain",display:"block",borderRadius:10,marginBottom:10}}/>
+                    <img src={imgPrev} alt="upload preview" style={{maxWidth:"100%",maxHeight:220,objectFit:"contain",display:"block",borderRadius:10,marginBottom:10}}/>
                     <button onClick={()=>{setImgData(null);setImgPrev(null);}} style={{fontSize:12,color:"#EF4444",background:"none",border:"none",cursor:"pointer",fontFamily:"inherit"}}>✕ Remove</button>
                   </div>
                 :<div onClick={()=>fileRef.current.click()} style={{padding:"46px 16px",textAlign:"center",cursor:"pointer"}}>
@@ -522,16 +646,7 @@ export default function App() {
         )}
       </div>
 
-      <style>{`
-        @keyframes pulse   {0%,100%{opacity:1}50%{opacity:.2}}
-        @keyframes wave    {from{transform:scaleY(.2)}to{transform:scaleY(1)}}
-        @keyframes fadeUp  {from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-        @keyframes dotBlink{0%,100%{opacity:1}50%{opacity:0}}
-        *{box-sizing:border-box;margin:0;padding:0;}
-        textarea::placeholder,input::placeholder{color:#D1D5DB;}
-        ::-webkit-scrollbar{width:4px;}
-        ::-webkit-scrollbar-thumb{background:#E5E7EB;border-radius:2px;}
-      `}</style>
+      <GlobalStyles/>
     </div>
   );
 }
