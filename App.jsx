@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 
 const G = {
   green:"#00B67A",gdk:"#008C5E",glt:"#E6F8F2",
@@ -187,135 +187,6 @@ function Result({ r }) {
   );
 }
 
-function HistoryBadge({ verdict }) {
-  const vc = VD[verdict] || VD.UNVERIFIED;
-  return (
-    <span style={{display:"inline-flex",alignItems:"center",gap:4,background:vc.bg,border:`1px solid ${vc.border}`,borderRadius:20,padding:"2px 10px",fontSize:11,color:vc.color,fontWeight:700}}>
-      {vc.icon} {vc.label}
-    </span>
-  );
-}
-
-function HistoryPage({ onVerify }) {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [expanded, setExpanded] = useState(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/history");
-      if (!res.ok) throw new Error("Failed to load history");
-      setRows(await res.json());
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  const verdictCounts = rows.reduce((acc, r) => {
-    acc[r.verdict] = (acc[r.verdict] || 0) + 1;
-    return acc;
-  }, {});
-
-  function formatDate(ts) {
-    if (!ts) return "";
-    const d = new Date(ts);
-    return d.toLocaleDateString("en-US", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" });
-  }
-
-  return (
-    <div style={{minHeight:"100vh",background:G.grayLt,fontFamily:"'DM Sans',sans-serif",color:G.text}}>
-      <div style={{maxWidth:660,margin:"0 auto",padding:"30px 18px 80px"}}>
-        <div style={{marginBottom:24}}>
-          <h1 style={{fontFamily:"'Poppins',sans-serif",fontSize:28,fontWeight:800,color:G.navy,marginBottom:4}}>Verification History</h1>
-          <p style={{fontSize:13,color:G.gray}}>All fact-checks performed on this platform, stored in real-time.</p>
-        </div>
-
-        {/* Stats */}
-        {rows.length>0&&(
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
-            {[["Total",rows.length,G.navy],["Real",verdictCounts.REAL||0,G.green],["Fake",verdictCounts.FAKE||0,"#EF4444"],["Misleading",(verdictCounts.MISLEADING||0)+(verdictCounts.UNVERIFIED||0),"#F59E0B"]].map(([l,v,c])=>(
-              <div key={l} style={{background:G.white,border:`1px solid ${G.grayBd}`,borderRadius:14,padding:"14px 10px",textAlign:"center",boxShadow:"0 1px 6px rgba(0,0,0,.04)"}}>
-                <div style={{fontFamily:"'Poppins',sans-serif",fontSize:26,fontWeight:800,color:c,lineHeight:1}}>{v}</div>
-                <div style={{fontSize:11,color:G.gray,marginTop:4}}>{l}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {loading&&(
-          <div style={{background:G.white,border:`1px solid ${G.grayBd}`,borderRadius:14,padding:"40px",textAlign:"center"}}>
-            <div style={{width:8,height:8,borderRadius:"50%",background:G.green,animation:"pulse 1s infinite",display:"inline-block",marginRight:8}}/>
-            <span style={{fontSize:13,color:G.gray}}>Loading history…</span>
-          </div>
-        )}
-
-        {error&&(
-          <div style={{background:"#FEF2F2",border:"1px solid #FECACA",borderRadius:14,padding:"16px 18px",color:"#991B1B",fontSize:13}}>
-            ⚠ {error}
-          </div>
-        )}
-
-        {!loading&&!error&&rows.length===0&&(
-          <div style={{background:G.white,border:`1px solid ${G.grayBd}`,borderRadius:18,padding:"56px 24px",textAlign:"center",boxShadow:"0 2px 12px rgba(0,0,0,.05)"}}>
-            <div style={{fontSize:48,marginBottom:16}}>🔍</div>
-            <div style={{fontFamily:"'Poppins',sans-serif",fontSize:18,fontWeight:700,color:G.navy,marginBottom:8}}>No verifications yet</div>
-            <p style={{fontSize:13,color:G.gray,marginBottom:24,lineHeight:1.7}}>Run your first fact-check and the results will appear here automatically.</p>
-            <button onClick={onVerify} style={{background:G.green,color:"#fff",border:"none",padding:"12px 28px",borderRadius:25,fontFamily:"inherit",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:`0 4px 14px ${G.green}50`}}>
-              Verify a claim →
-            </button>
-          </div>
-        )}
-
-        {!loading&&rows.length>0&&(
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {rows.map((row)=>{
-              const isOpen = expanded===row.id;
-              let parsed = null;
-              if (isOpen) {
-                try { parsed = JSON.parse(row.resultJson||"{}"); } catch {}
-              }
-              return (
-                <div key={row.id} style={{background:G.white,border:`1px solid ${G.grayBd}`,borderRadius:16,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,.04)",transition:"box-shadow .2s"}}>
-                  <button onClick={()=>setExpanded(isOpen?null:row.id)}
-                    style={{width:"100%",padding:"16px 18px",border:"none",background:"none",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:12,fontFamily:"inherit"}}>
-                    <HistoryBadge verdict={row.verdict}/>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:13,color:G.navy,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                        {row.inputType==="image"?"[Image verification]":row.inputText}
-                      </div>
-                      <div style={{fontSize:11,color:G.gray,marginTop:2,display:"flex",gap:10}}>
-                        <span>{row.category}</span>
-                        <span>·</span>
-                        <span>{row.confidence}% confidence</span>
-                        <span>·</span>
-                        <span>{formatDate(row.createdAt)}</span>
-                      </div>
-                    </div>
-                    <span style={{fontSize:12,color:G.gray,flexShrink:0}}>{isOpen?"▲":"▼"}</span>
-                  </button>
-                  {isOpen&&parsed&&(
-                    <div style={{padding:"0 18px 18px",borderTop:`1px solid ${G.grayBd}`}}>
-                      <div style={{paddingTop:16}}>
-                        <Result r={parsed}/>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 export default function App() {
   const [page,    setPage]    = useState("home");
@@ -385,32 +256,17 @@ export default function App() {
     `}</style>
   );
 
-  const NavBar = ({ showHistory = true }) => (
+  const NavBar = () => (
     <nav style={{background:G.white,borderBottom:`1px solid ${G.grayBd}`,padding:"0 20px",height:62,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50,boxShadow:"0 1px 10px rgba(0,0,0,.06)"}}>
       <Logo onClick={()=>{setPage("home");reset();}}/>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         {loading&&<span style={{fontFamily:"monospace",fontSize:12,color:G.green,fontWeight:700}}>{(elapsed/1000).toFixed(1)}s</span>}
         <Pill color={G.green}>🌐 LIVE</Pill>
-        {showHistory&&(
-          <button onClick={()=>setPage("history")} style={{background:page==="history"?G.glt:"none",color:page==="history"?G.gdk:G.gray,border:`1px solid ${page==="history"?G.green+"50":G.grayBd}`,padding:"8px 16px",borderRadius:20,fontFamily:"inherit",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-            History
-          </button>
-        )}
         <button onClick={()=>{setPage("verify");reset();}} style={{background:G.green,color:"#fff",border:"none",padding:"10px 22px",borderRadius:25,fontFamily:"inherit",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:`0 4px 14px ${G.green}50`}}>
           Verify →
         </button>
       </div>
     </nav>
-  );
-
-  // ── HISTORY ───────────────────────────────────────────────────────────────
-  if (page==="history") return (
-    <div style={{minHeight:"100vh",background:G.grayLt,fontFamily:"'DM Sans',sans-serif",color:G.text}}>
-      <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800;900&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
-      <NavBar/>
-      <HistoryPage onVerify={()=>setPage("verify")}/>
-      <GlobalStyles/>
-    </div>
   );
 
   // ── HOME ──────────────────────────────────────────────────────────────────
@@ -425,9 +281,6 @@ export default function App() {
             <div style={{width:6,height:6,borderRadius:"50%",background:G.green,animation:"pulse 2s infinite"}}/>
             <span style={{fontSize:11,color:G.gdk,fontWeight:600,letterSpacing:1}}>LIVE</span>
           </div>
-          <button onClick={()=>setPage("history")} style={{background:"none",color:G.gray,border:`1px solid ${G.grayBd}`,padding:"10px 18px",borderRadius:25,fontFamily:"inherit",fontSize:14,cursor:"pointer"}}>
-            History
-          </button>
           <button onClick={()=>setPage("verify")} style={{background:G.green,color:"#fff",border:"none",padding:"10px 22px",borderRadius:25,fontFamily:"inherit",fontSize:14,fontWeight:700,cursor:"pointer",boxShadow:`0 4px 14px ${G.green}50`}}>
             Get Started →
           </button>
@@ -458,9 +311,6 @@ export default function App() {
           <div style={{display:"flex",gap:14,justifyContent:"center",flexWrap:"wrap"}}>
             <button onClick={()=>setPage("verify")} style={{background:G.green,color:"#fff",border:"none",padding:"16px 34px",borderRadius:30,fontFamily:"inherit",fontSize:16,fontWeight:700,cursor:"pointer",boxShadow:`0 8px 28px ${G.green}60`}}>
               Verify a claim free →
-            </button>
-            <button onClick={()=>setPage("history")} style={{background:"rgba(255,255,255,.1)",color:"#fff",border:"1px solid rgba(255,255,255,.25)",padding:"16px 28px",borderRadius:30,fontFamily:"inherit",fontSize:15,cursor:"pointer"}}>
-              View history
             </button>
           </div>
           <div style={{display:"flex",justifyContent:"center",gap:32,marginTop:48,flexWrap:"wrap"}}>
